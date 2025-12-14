@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1"><!-- Begin Jekyll SEO tag v2.8.0 -->
+<title>Sniffing https traffic on Android 11 | Learning Frida</title>
+<meta name="generator" content="Jekyll v3.9.2" />
+<meta property="og:title" content="Sniffing https traffic on Android 11" />
+<meta name="author" content="Niklas" />
+<meta property="og:locale" content="en_US" />
+<meta name="description" content="Being able to intercept, inspect and modify https traffic between an app and a server can be very useful. In this post I’m going to describe how you can do this with Burp Suite and the Android Studio Emulator running any Android version from 4 until 11 which is the latest version at the time of writing." />
+<meta property="og:description" content="Being able to intercept, inspect and modify https traffic between an app and a server can be very useful. In this post I’m going to describe how you can do this with Burp Suite and the Android Studio Emulator running any Android version from 4 until 11 which is the latest version at the time of writing." />
+<link rel="canonical" href="https://nibarius.github.io/learning-frida/2021/01/23/sniffing-https-traffic" />
+<meta property="og:url" content="https://nibarius.github.io/learning-frida/2021/01/23/sniffing-https-traffic" />
+<meta property="og:site_name" content="Learning Frida" />
+<meta property="og:type" content="article" />
+<meta property="article:published_time" content="2021-01-23T00:00:00+00:00" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Sniffing https traffic on Android 11" />
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Niklas"},"dateModified":"2021-01-23T00:00:00+00:00","datePublished":"2021-01-23T00:00:00+00:00","description":"Being able to intercept, inspect and modify https traffic between an app and a server can be very useful. In this post I’m going to describe how you can do this with Burp Suite and the Android Studio Emulator running any Android version from 4 until 11 which is the latest version at the time of writing.","headline":"Sniffing https traffic on Android 11","mainEntityOfPage":{"@type":"WebPage","@id":"https://nibarius.github.io/learning-frida/2021/01/23/sniffing-https-traffic"},"url":"https://nibarius.github.io/learning-frida/2021/01/23/sniffing-https-traffic"}</script>
+<!-- End Jekyll SEO tag -->
+<link rel="stylesheet" href="/learning-frida/assets/main.css"><link type="application/atom+xml" rel="alternate" href="https://nibarius.github.io/learning-frida/feed.xml" title="Learning Frida" /><link rel="icon" href="/learning-frida/assets/favicon.png" type="image/png">
+</head>
+<body><header class="site-header" role="banner">
+
+  <div class="wrapper"><a class="site-title" rel="author" href="/learning-frida/">Learning Frida</a><nav class="site-nav">
+        <input type="checkbox" id="nav-trigger" class="nav-trigger" />
+        <label for="nav-trigger">
+          <span class="menu-icon">
+            <svg viewBox="0 0 18 15" width="18px" height="15px">
+              <path d="M18,1.484c0,0.82-0.665,1.484-1.484,1.484H1.484C0.665,2.969,0,2.304,0,1.484l0,0C0,0.665,0.665,0,1.484,0 h15.032C17.335,0,18,0.665,18,1.484L18,1.484z M18,7.516C18,8.335,17.335,9,16.516,9H1.484C0.665,9,0,8.335,0,7.516l0,0 c0-0.82,0.665-1.484,1.484-1.484h15.032C17.335,6.031,18,6.696,18,7.516L18,7.516z M18,13.516C18,14.335,17.335,15,16.516,15H1.484 C0.665,15,0,14.335,0,13.516l0,0c0-0.82,0.665-1.483,1.484-1.483h15.032C17.335,12.031,18,12.695,18,13.516L18,13.516z"/>
+            </svg>
+          </span>
+        </label>
+
+        <div class="trigger"><a class="page-link" href="/learning-frida/cheat-sheet/">Cheat sheet</a><a class="page-link" href="/learning-frida/links/">Links</a><a class="page-link" href="/learning-frida/about/">About</a></div>
+      </nav></div>
+</header>
+<main class="page-content" aria-label="Content">
+      <div class="wrapper">
+        <article class="post h-entry" itemscope itemtype="http://schema.org/BlogPosting">
+
+  <header class="post-header">
+    <h1 class="post-title p-name" itemprop="name headline">Sniffing https traffic on Android 11</h1>
+    <p class="post-meta">
+      <time class="dt-published" datetime="2021-01-23T00:00:00+00:00" itemprop="datePublished">Jan 23, 2021
+      </time>
+<img id="page-view-counter" onerror="this.parentNode.removeChild(this)" style="float:right; padding-right: 8px;">
+<script>
+  const text = '/2021/01/23/sniffing-https-traffic';
+  async function digestMessage(message) {
+    const msgUint8 = new TextEncoder().encode(message);                           // encode as (utf-8) Uint8Array
+    const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);           // hash the message
+    const hashArray = Array.from(new Uint8Array(hashBuffer));                     // convert buffer to byte array
+    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join(''); // convert bytes to hex string
+    document.getElementById('page-view-counter').src = "https://barsk.xyz/counter?id=" + hashHex;
+    return hashHex;
+  }
+  digestMessage(text);
+</script>
+
+    </p>
+  </header>
+
+  <div class="post-content e-content" itemprop="articleBody">
+    <p>Being able to intercept, inspect and modify https traffic between an app and a server can be very useful. In this post I’m going to describe how you can do this with Burp Suite and the Android Studio Emulator running any Android version from 4 until 11 which is the latest version at the time of writing.</p>
+
+<h2 id="basics">Basics</h2>
+
+<p>If you want to intercept traffic going in and out from a phone you can set up an http/https proxy server, make sure your phone uses it and then monitor all traffic going trough the proxy. By doing this you can easily see all http traffic, but since https traffic is encrypted the proxy is not able to read the data.</p>
+
+<p>To be able to intercept the https traffic the proxy could pretend to be the remote server and present it’s own certificate to the phone when it is trying to connect to the remote server. However, since the proxy’s certificate is not trusted by the phone the phone will not accept this. If you can get the phone to trust the proxy’s certificate, for example by installing it as a trusted certificate, the phone will happily accept it when it is presented by the proxy.</p>
+
+<p>When this is done the proxy decrypts the incoming request and can do whatever it wants with it, before it sets up a new https connection with the remote server, pretending to be the app and thus acting as a <a href="https://en.wikipedia.org/wiki/Man-in-the-middle_attack">man in the middle (MITM)</a>.</p>
+
+<figure class="image">
+  <img src="/learning-frida/assets/https-sniffing/mitm.png" alt="" />
+  <figcaption></figcaption>
+</figure>
+
+<h2 id="proxy-and-certificate-setup">Proxy and certificate setup</h2>
+
+<h3 id="installing-the-proxy">Installing the proxy</h3>
+
+<p>We’ll get started by installing and preparing the proxy server we want to use. My proxy of choice is <a href="https://www.telerik.com/download/fiddler">Fiddler (classic)</a>, it’s pretty nice looking and easy to use for both observing and modifying traffic. While it works great most of the time, I haven’t been able to get it to work when I install it’s certificate as a system certificate on an emulator. With physical phones it works fine, but when using an emulator it breaks down. If you manage to get Fiddler working well with the Android Studio emulator, please let me know.</p>
+
+<p>Due to this I have to settle with <a href="https://portswigger.net/burp/communitydownload">Burp Suite Community Edition</a> instead. It’s a very powerful and popular choice even though I haven’t learned to like it yet.</p>
+
+<p>Install Burp and find your way to <code class="language-plaintext highlighter-rouge">Proxy</code> → <code class="language-plaintext highlighter-rouge">Options</code> and click on the <code class="language-plaintext highlighter-rouge">Import / export CA certificate</code> button and export the <code class="language-plaintext highlighter-rouge">Certificate in DER format</code> to a convenient place. While on the options page also add a proxy listener bound to your computer’s ip address and a suitable port and remember this for later.</p>
+
+<figure class="image">
+  <img src="/learning-frida/assets/https-sniffing/burp-setup.png" alt="Create a proxy listener and export the certificate." />
+  <figcaption>Create a proxy listener and export the certificate.</figcaption>
+</figure>
+
+<h3 id="converting-the-certificate-to-the-correct-format">Converting the certificate to the correct format</h3>
+
+<p>If you’re working with Android 6 or lower you can skip this section, but on newer Android versions we will have to install the proxy’s certificate as a system certificate. On Android, the system certificates are stored in PEM format in the folder <code class="language-plaintext highlighter-rouge">/system/etc/security/cacerts/</code> with the filename <code class="language-plaintext highlighter-rouge">&lt;hash&gt;.0</code>.</p>
+
+<p>The certificate we exported from Burp is in DER format, so we need to convert it to PEM using openssl and make sure that it has the correct filename:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>openssl x509 -inform der -in burp.cer -out certificate.pem
+cp certificate.pem `openssl x509 -inform pem -subject_hash_old -in certificate.pem | head -1`.0
+</code></pre></div></div>
+
+<h2 id="emulator-setup">Emulator setup</h2>
+
+<p>For maximum availability I’m using the emulator bundled with <a href="https://developer.android.com/studio">Android Studio</a>. <a href="https://www.genymotion.com/desktop/">Genymotion</a> is another option, but that’s only available for free for personal use so that comes with some limitations or additional cost.</p>
+
+<p>When it comes to choosing which image to use for the emulator there are three main choices: An image without any Google APIs, one with Google APIs and one with Google Play. The Google Play images includes the Google Play app and access to Google Play services. This would be ideal as it’s very similar to real phones, however they are considered <a href="https://developer.android.com/studio/run/managing-avds#system-image">production builds</a> and root is not available on them.</p>
+
+<p>Google API images lacks the Google Play app, but includes access to Google Play services and are not considered production builds which means root access is available. There is rarely any reason to pick a plain Android version without Google APIs.</p>
+
+<p>It’s possible to intercept https traffic on any Android version from at least 4 and up to at least 11, so let’s go for the <code class="language-plaintext highlighter-rouge">Android 11.0 (Google APIs)</code> image.</p>
+
+<figure class="image">
+  <img src="/learning-frida/assets/https-sniffing/system-image.png" alt="An Android 11.0 (Google APIs) image is a good choice." />
+  <figcaption>An Android 11.0 (Google APIs) image is a good choice.</figcaption>
+</figure>
+
+<h2 id="installing-the-certificate-on-the-emulator">Installing the certificate on the emulator</h2>
+
+<h3 id="android-4---6">Android 4 - 6</h3>
+
+<p>On Android versions 4 to 6 the setup is very easy, you don’t even need root access for this. This makes these Android versions a great choice when testing real non-rooted phones with access to all Google apps and services that still support these versions.</p>
+
+<p>Start by copying the certificate exported from Burp to the device or emulator. Then open up settings and find your way to <code class="language-plaintext highlighter-rouge">Security</code> → <code class="language-plaintext highlighter-rouge">Install from storage</code> and select the proxy’s certificate. You then give the certificate any name, select <code class="language-plaintext highlighter-rouge">VPN and apps</code> as “Credential use”, press OK and you’re done.</p>
+
+<p>You can check that the certificate has been installed by going to <code class="language-plaintext highlighter-rouge">Security</code> → <code class="language-plaintext highlighter-rouge">Trusted credentials</code> → <code class="language-plaintext highlighter-rouge">User</code>. It’s also possible to remove the certificate from here if you want to.</p>
+
+<h3 id="android-7-or-newer">Android 7 or newer</h3>
+
+<p>On Android 7 (Nougat) or newer, <a href="https://android-developers.googleblog.com/2016/07/changes-to-trusted-certificate.html">the system rejects</a> user added certificates by default and only allows them if the app explicitly opts in to it. To get the phone to use your proxy’s certificate with any app, you have to install it as a system certificate. To do this you need root access and a writable system partition.</p>
+
+<h4 id="starting-the-emulator-with-writable-system">Starting the emulator with writable system</h4>
+
+<p>To be able to install the certificate, we need to start the emulator with a writable system. This is done by starting the emulator from command line with the parameter <code class="language-plaintext highlighter-rouge">-writable-system</code>. You also need to specify which system image you want to use, which you do with the <code class="language-plaintext highlighter-rouge">-avd</code> parameter. I called my image rRoot since that’s easy to type and remember.</p>
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>./emulator -avd rRoot -writable-system
+</code></pre></div></div>
+
+<p>The location of the emulator executable depends on where you’ve installed your Android SDK. For me it is located in <code class="language-plaintext highlighter-rouge">D:\Android\sdk\emulator</code>.</p>
+
+<h4 id="disabling-verified-boot-android-10-and-newer">Disabling verified boot (Android 10 and newer)</h4>
+
+<p>Starting with Android 10 it’s <a href="https://issuetracker.google.com/issues/144891973#comment23">no longer possible</a> to get a writable system partition on the images obtained trough Android Studio due to <a href="https://source.android.com/security/verifiedboot">verified boot</a>. So before we can do any changes to the system directory we need to disable verified boot. Luckily enough it’s <a href="https://android-review.googlesource.com/c/platform/external/avb/+/418399">possible to do this</a> using the <code class="language-plaintext highlighter-rouge">avbctl</code> command line tool.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>adb root
+adb shell avbctl disable-verification
+adb reboot
+</code></pre></div></div>
+
+<h4 id="installing-the-certificate">Installing the certificate</h4>
+
+<p>Before we can install the certificate we need to copy it to the device. The easiest way to do this is to drag-drop it onto the emulator to get it copied into the Download directory. Once that’s done we can install it as a system certificate. Pay attention to the name of your certificate, it might not be the same as mine.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>adb root
+adb remount
+adb shell
+cp /sdcard/Download/9a5ba575.0 /system/etc/security/cacerts/
+chmod 644 /system/etc/security/cacerts/9a5ba575.0
+reboot
+</code></pre></div></div>
+
+<p><strong>Note</strong>: Android will only see your newly installed certificate if you start the emulator with <code class="language-plaintext highlighter-rouge">-writable-system</code>, so make sure to always start the emulator with this flag.</p>
+
+<h4 id="verifying-that-the-certificate-has-been-installed">Verifying that the certificate has been installed</h4>
+
+<p>To verify that the phone has detected your certificate you can take a look at the list of trusted system credentials at:
+<code class="language-plaintext highlighter-rouge">Settings</code> → <code class="language-plaintext highlighter-rouge">Security</code> → <code class="language-plaintext highlighter-rouge">Advanced</code> → <code class="language-plaintext highlighter-rouge">Encryption &amp; credentials</code> → <code class="language-plaintext highlighter-rouge">Trusted credentials</code> → <code class="language-plaintext highlighter-rouge">System</code></p>
+
+<p>Scroll down in the very long alphabetic list and see if you can find your certificate. If you’re using Burp you should be looking for a certificate named <code class="language-plaintext highlighter-rouge">PortSwigger</code>. If you can find it everything is working and you’re ready to move on to the next step.</p>
+
+<p>If not, double check that you have installed the correct certificate with the correct name and that the permissions are correct. It’s easy to accidentally change the permissions of the wrong certificate if using tab completion, it’s happened more than once for me.</p>
+
+<figure class="image">
+  <img src="/learning-frida/assets/https-sniffing/certificate-installed.png" alt="Burp's certificate has been successfully installed as a system certificate." />
+  <figcaption>Burp's certificate has been successfully installed as a system certificate.</figcaption>
+</figure>
+
+<h2 id="setup-the-emulator-to-use-the-proxy">Setup the emulator to use the proxy</h2>
+
+<p>With the certificate set up, the next step is to configure the emulator to connect to our proxy. There are several ways to do this, but the method that’s been most reliable for me is to set up a new APN that uses the proxy. If you are using a physical device, it’s probably better to edit the WiFi settings instead so that it uses a proxy.</p>
+
+<p>In the emulator, open up settings and navigate to <code class="language-plaintext highlighter-rouge">Network &amp; internet</code> → <code class="language-plaintext highlighter-rouge">Mobile network</code> → <code class="language-plaintext highlighter-rouge">Advanced</code> → <code class="language-plaintext highlighter-rouge">Access Point Names</code> and press the plus button to add a new APN. On the Edit access point view that’s shown you can provide anything as Name and APN. I use “Burp” to easily recognize it. Under Proxy and Port you enter the IP address and port of your proxy server from earlier. Now you open the three dot menu and press save and then select the new APN.</p>
+
+<p>With this setup all mobile traffic will go trough configured proxy. WiFi traffic will not go trough the proxy, so it’s good to make sure that WiFi is disabled.</p>
+
+<figure class="image">
+  <img src="/learning-frida/assets/https-sniffing/apn-setup.png" alt="Configure the phone to connect to your proxy server." />
+  <figcaption>Configure the phone to connect to your proxy server.</figcaption>
+</figure>
+
+<h2 id="setup-complete">Setup complete</h2>
+<p>Now we’re finally ready and should be able to intercept both http and https traffic from the emulator. To verify that everything is working we can fire up the browser on the emulator and load <a href="https://example.com">https://example.com</a> and make sure that we can see the traffic in Burp.</p>
+
+<figure class="image">
+  <img src="/learning-frida/assets/https-sniffing/it-works.png" alt="Setup complete, we can now capture https traffic on a rooted Android 11 emulator." />
+  <figcaption>Setup complete, we can now capture https traffic on a rooted Android 11 emulator.</figcaption>
+</figure>
+
+<p>When analyzing network traffic you might notice that some apps works fine when you’re not looking at the traffic, but refuse to communicate with their server when you are trying to intercept the traffic. This is usually because they have implemented <a href="https://expeditedsecurity.com/blog/what-is-certificate-pinning/">certificate pinning</a> as a method to prevent MITM attacks. This can be bypassed using Frida, but that’s a topic for <a href="/learning-frida/2022/11/18/bypassing-pinning">another post</a>.</p>
+
+<h3 id="attribution">Attribution</h3>
+<p>The <a href="/learning-frida/assets/https-sniffing/mitm.png">MITM illustration</a> in the beginning of the article is created by me (Niklas Barsk) and is available under the Creative Commons <a href="https://creativecommons.org/licenses/by/4.0/">CCBY 4.0</a> license. It is a derivative work based on <a href="https://thenounproject.com/icon/2095071/">girl</a> and <a href="https://thenounproject.com/icon/352401/">Mmm</a> by Xinh Studio, <a href="https://thenounproject.com/icon/3095387/">freelancer</a> by Andrei Yushchenko and <a href="https://thenounproject.com/icon/2697635/">Eye</a> by Flatart all from the <a href="https://thenounproject.com/">Noun Project</a>.</p>
+
+
+  </div><style type="text/css">
+    .PageNavigation {
+      font-size: 14px;
+      display: block;
+      width: auto;
+      overflow: hidden;
+    }
+
+    .PageNavigation a {
+      display: block;
+      width: 50%;
+      float: left;
+      margin: 1em 0;
+    }
+
+    .PageNavigation .next {
+      float: right;
+      text-align: right;
+    }
+  </style>
+  <div class="PageNavigation">
+  
+    <a class="prev" href="/learning-frida/2020/08/29/veryandroidoso">&laquo; DEFCON Quals 2019 Veryandroidoso</a>
+  
+  
+    <a class="next" href="/learning-frida/2021/02/08/cybergym">Cybergym 3.0 mobile challenges &raquo;</a>
+  
+  </div>
+
+  <script src="/learning-frida/js/jquery.min.js"></script>
+  
+<script type="text/javascript">
+    
+    document.querySelector(".post-content").innerHTML = document.querySelector(".post-content").innerHTML + "<div id='comments'></div>";
+    document.getElementById("comments").innerHTML = "<h3>Comments</h3><p>You can <a href='https://github.com/nibarius/learning-frida/issues/12' target='_blank'>view the comments</a> on GitHub.</p>";
+
+    function reloadComments() {
+        var elements = document.querySelectorAll('.comment');
+        Array.prototype.forEach.call(elements, function(el, i){
+            el.remove();
+        });
+        $.ajax("https://api.github.com/repos/nibarius/learning-frida/issues/12/comments?per_page=100", {
+            headers: {Accept: "application/vnd.github.full+json"},
+            dataType: "json",
+            success: function(msg){
+                localStorage.setItem('comments_nibarius/learning-frida_12',JSON.stringify(msg));
+                loadComments(msg);
+            },
+            error: function() { 
+                document.getElementById("comments").innerHTML = "<h3>Comments</h3><p>You can <a href='https://github.com/nibarius/learning-frida/issues/12' target='_blank'>view the comments</a> on GitHub. The comments cannot be shown inline because we have hit the rate limit of Github.</p>";
+            }
+        });
+        return false;
+    }
+    function loadComments(data) {
+        $("#comments").html("<h3>Comments</h3><p>You can <a href='https://github.com/nibarius/learning-frida/issues/12' target='_blank'>leave a comment</a> through GitHub, or <a onclick=' reloadComments();' style='cursor: pointer;'>refresh</a> the comments below.</p>");
+        for (var i=0; i<data.length; i++) {
+            var cuser = data[i].user.login;
+            var cuserlink = "https://www.github.com/" + data[i].user.login;
+            var clink = "https://github.com/nibarius/learning-frida/issues/12#issuecomment-" + data[i].url.substring(data[i].url.lastIndexOf("/")+1);
+            var cbody = data[i].body_html;
+            
+                var cavatarlink = data[i].user.avatar_url;
+            
+            var cdate = data[i].created_at;
+            document.getElementById("comments").innerHTML = document.getElementById("comments").innerHTML + "<div class='comment'><div class='commentgravatar'>" + '<img src="' + cavatarlink + '" alt="' + cuser + '">' + "</div><div class='commentheader'><a class='commentuser' href=\""+ cuserlink + "\">" + cuser + "</a> commented <a class='commentdate' href=\"" + clink + "\">on " + cdate.substring(0, 10) + "</a></div><div class='commentbody'>" + cbody + "</div></div>";
+            $('img[data-src]').replaceWith( "[Image blocked] " );
+        }
+    }
+    var data = localStorage.getItem('comments_nibarius/learning-frida_12');
+    if(data) {
+        loadComments(JSON.parse(data));
+    } else {
+        
+            reloadComments();
+        
+    }
+</script>
+<style>
+.comment {padding: 5px 0 15px;}
+.comment P:last-child {margin-bottom: 0;}
+.commentgravatar {position: absolute; width: 40px; border: 1px solid #e5e5e5;}
+.commentheader, .commentbody {padding: 5px 10px; margin-left: 55px; border: 1px solid #e5e5e5; background: white;}
+.commentheader {position: relative; background: #f4f4f4; border-bottom: 0;}
+.commentbody {padding: 10px 10px 13px;}
+.commentheader a {color: #777777;}
+.commentheader::before {
+    position: absolute;
+    content: "";
+    display: block;
+    width: 9px;
+    height: 9px;
+    background: #f4f4f4;
+    transform: rotate(-45deg);
+    left: 0;
+    margin-left: -4px;
+    margin-top: 4px;
+    box-shadow: -1px -1px 0px 0px rgba(0, 0, 0, 0.15);
+}
+</style>
+
+
+  <a class="u-url" href="/learning-frida/2021/01/23/sniffing-https-traffic" hidden></a>
+</article>
+
+      </div>
+    </main><footer class="site-footer h-card">
+  <data class="u-url" href="/learning-frida/"></data>
+
+  <div class="wrapper">
+
+    <h2 class="footer-heading">Learning Frida</h2>
+
+    <div class="footer-col-wrapper">
+      <div class="footer-col footer-col-1">
+        <ul class="contact-list">
+          <li class="p-name">Niklas</li><li><a class="u-email" href="mailto:learning-frida@barsk.xyz">learning-frida@barsk.xyz</a></li></ul>
+      </div>
+
+      <div class="footer-col footer-col-2"><ul class="social-media-list"><li><a href="https://github.com/nibarius"><svg class="svg-icon"><use xlink:href="/learning-frida/assets/minima-social-icons.svg#github"></use></svg> <span class="username">nibarius</span></a></li><li><a href="https://www.linkedin.com/in/niklasbarsk"><svg class="svg-icon"><use xlink:href="/learning-frida/assets/minima-social-icons.svg#linkedin"></use></svg> <span class="username">niklasbarsk</span></a></li><li><a href="https://www.twitter.com/NiklasBarsk"><svg class="svg-icon"><use xlink:href="/learning-frida/assets/minima-social-icons.svg#twitter"></use></svg> <span class="username">NiklasBarsk</span></a></li></ul>
+</div>
+
+      <div class="footer-col footer-col-3">
+        <p>I&#39;m learning Frida by solving Android reverse engineering challenges and blogging about it.</p>
+      </div>
+    </div>
+
+  </div>
+
+</footer>
+</body>
+
+</html>
