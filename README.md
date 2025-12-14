@@ -12,3 +12,6 @@ emu64a:/data/local/tmp # ./frida-server
 ```
 adb push frida-server /data/local/tmp/
 ```
+
+https://decrypt.day - ipa ios
+https://github.com/PlayCover/PlayCover - .ipa installer in macos
