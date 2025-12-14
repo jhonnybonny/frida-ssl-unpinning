@@ -8,3 +8,7 @@ adb shell
 emu64a:/ # cd  /data/local/tmp/
 emu64a:/data/local/tmp # ./frida-server                                                                                                                               
 ```
+
+```
+adb push frida-server /data/local/tmp/
+```
